@@ -6,9 +6,9 @@ All operations are guarded by the host allowlist from config.
 Threading model: Each SSHConnection uses a single RLock that is held during
 all operations (connect, execute, upload, download). This is intentional —
 paramiko's SSHClient is not thread-safe for concurrent operations on the
-same transport. The per-read timeout set by exec_command bounds each blocking
-recv call, so the lock is held for at most command_timeout per individual read
-(not indefinitely).
+same transport. The lock is held for the full duration of each operation
+(not just a single read), so concurrent tool calls targeting the same host
+will queue behind the running operation.
 """
 
 import logging
@@ -32,7 +32,8 @@ logger = logging.getLogger("mcp-ssh")
 # Note: OpenSSH wraps exec_command in /bin/sh -c "...", so all these
 # characters have shell significance.
 # Excluded: ! (only in interactive bash), {} (brace expansion, not execution)
-_SHELL_META_RE = re.compile(r"[;&|`$()<>\n]")
+# Includes quotes to prevent subcommand injection (e.g. docker exec ... sh -c '...')
+_SHELL_META_RE = re.compile(r"[;&|`$()<>\n\"']")
 
 
 class ConnectionState(Enum):
@@ -203,8 +204,23 @@ class SSHConnection:
                 t_err = threading.Thread(target=_read_stderr, daemon=True)
                 t_out.start()
                 t_err.start()
-                t_out.join()
-                t_err.join()
+
+                # Bounded join: if the command produces no output for
+                # command_timeout seconds, the per-recv timeout in the
+                # reader thread will fire and unblock the join.  The
+                # extra buffer here covers the gap between the last
+                # recv timeout and thread teardown.
+                join_deadline = self.config.command_timeout + 5
+                t_out.join(timeout=join_deadline)
+                t_err.join(timeout=join_deadline)
+
+                if t_out.is_alive() or t_err.is_alive():
+                    # Reader threads stuck — kill the channel so they unblock
+                    stdout.channel.close()
+                    raise TimeoutError(
+                        f"Command timed out on '{self.config.name}' "
+                        f"(no output for {self.config.command_timeout}s)"
+                    )
 
                 # Propagate thread exceptions with the real root cause
                 if out_exc:
@@ -216,9 +232,15 @@ class SSHConnection:
                 err = err_buf[0].decode("utf-8", errors="replace")
                 exit_code = stdout.channel.recv_exit_status()
                 self._last_used = time.monotonic()
-            except Exception as e:
+            except paramiko.SSHException as e:
                 self.state = ConnectionState.ERROR
-                # Log full details to stderr, return sanitized message to caller
+                logger.error(f"Transport error on {self.config.name}: {e}")
+                raise RuntimeError(
+                    f"Command execution failed on '{self.config.name}'"
+                )
+            except Exception as e:
+                # Non-transport error (timeout, decode, etc.) — connection
+                # may still be alive, don't force a reconnect.
                 logger.error(f"Command failed on {self.config.name}: {e}")
                 raise RuntimeError(
                     f"Command execution failed on '{self.config.name}'"
@@ -261,8 +283,15 @@ class SSHConnection:
                 finally:
                     sftp.close()
                 self._last_used = time.monotonic()
-            except Exception as e:
+            except paramiko.SSHException as e:
                 self.state = ConnectionState.ERROR
+                logger.error(f"Upload transport error on {self.config.name}: {e}")
+                raise RuntimeError(
+                    f"Upload failed to '{self.config.name}': {remote_path}"
+                )
+            except Exception as e:
+                # SFTP-level error (permissions, disk full, etc.) —
+                # connection itself may still be alive.
                 logger.error(f"Upload failed to {self.config.name}: {e}")
                 raise RuntimeError(
                     f"Upload failed to '{self.config.name}': {remote_path}"
@@ -294,7 +323,7 @@ class SSHConnection:
                 finally:
                     sftp.close()
                 self._last_used = time.monotonic()
-            except Exception as e:
+            except paramiko.SSHException as e:
                 # Clean up partial download file
                 try:
                     if os.path.exists(local_path):
@@ -303,6 +332,18 @@ class SSHConnection:
                 except OSError:
                     pass
                 self.state = ConnectionState.ERROR
+                logger.error(f"Download transport error from {self.config.name}: {e}")
+                raise RuntimeError(
+                    f"Download failed from '{self.config.name}': {remote_path}"
+                )
+            except Exception as e:
+                # SFTP-level error — clean up but don't mark connection as dead
+                try:
+                    if os.path.exists(local_path):
+                        os.unlink(local_path)
+                        logger.warning(f"Cleaned up partial download: {local_path}")
+                except OSError:
+                    pass
                 logger.error(f"Download failed from {self.config.name}: {e}")
                 raise RuntimeError(
                     f"Download failed from '{self.config.name}': {remote_path}"

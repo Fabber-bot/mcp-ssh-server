@@ -9,7 +9,7 @@
       "port": 22,
       "username": "root",
       "identity_file": "~/.ssh/id_rsa",
-      "auto_accept_host_key": true,
+      "auto_accept_host_key": false,
       "command_timeout": 60,
       "transfer_timeout": 300
     },

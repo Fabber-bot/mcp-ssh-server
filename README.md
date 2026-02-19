@@ -1,6 +1,9 @@
 # MCP SSH Server
 
-Secure SSH access for Claude Code via the [Model Context Protocol](https://modelcontextprotocol.io/).
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+
+Secure SSH access via the [Model Context Protocol](https://modelcontextprotocol.io/).
 
 ## Features
 
@@ -51,9 +54,9 @@ Edit `hosts.json` with your SSH hosts. Minimum required fields:
 > **Security:** If your config contains passwords, restrict file permissions:
 > `chmod 600 hosts.json`
 
-### 3. Add to Claude Code
+### 3. Add to your MCP client
 
-Add to your Claude Code MCP settings (`.claude/settings.local.json`):
+Add to your MCP client settings (e.g. `settings.json`):
 
 ```json
 {
@@ -81,11 +84,11 @@ Or if installed globally:
 
 > **Important:** Always use `--config` with an absolute path. Without it, the
 > server looks for `hosts.json` in the current working directory (which may not
-> be where you expect when launched by Claude Code).
+> be where you expect when launched by an MCP client).
 
-### 4. Use in Claude Code
+### 4. Use it
 
-Claude will automatically discover the SSH tools. Example prompts:
+Your MCP client will automatically discover the SSH tools. Example prompts:
 
 - "List my SSH hosts"
 - "Run `nvidia-smi` on runpod"
@@ -137,7 +140,7 @@ Claude will automatically discover the SSH tools. Example prompts:
 
 1. **Allowlisted hosts only** — the LLM cannot connect to arbitrary machines
 2. **Remote shell execution** — commands are sent via SSH `exec` channel; most SSH servers (OpenSSH) wrap them in `/bin/sh -c`, so shell features like pipes work on unrestricted hosts
-3. **Shell metacharacter blocking** — for hosts with `allowed_commands`, shell metacharacters (`;`, `&`, `|`, `` ` ``, `$`, `()`, `<>`, newlines) are rejected to prevent command chaining bypasses
+3. **Shell metacharacter blocking** — for hosts with `allowed_commands`, shell metacharacters (`;`, `&`, `|`, `` ` ``, `$`, `()`, `<>`, quotes, newlines) are rejected to prevent command chaining and subcommand injection. **Note:** the allowlist checks the first word of the command only. Commands like `docker`, `kubectl`, or `systemctl` that accept arbitrary subcommands as positional arguments are not safe to allowlist alone — they can still invoke arbitrary code through their own subcommand mechanisms even without shell metacharacters
 4. **Host key verification** — `RejectPolicy` by default; requires hosts in `known_hosts`
 5. **Audit trail** — every action (status check, connect, execute, upload, download, disconnect) is logged
 6. **No credential leakage** — passwords/keys are never returned in tool responses; paramiko errors are logged to stderr only, not exposed to the LLM
@@ -146,7 +149,7 @@ Claude will automatically discover the SSH tools. Example prompts:
 ## Architecture
 
 ```
-Claude Code  <--STDIO-->  FastMCP Server  <--Paramiko-->  Remote Hosts
+MCP Client  <--STDIO-->  FastMCP Server  <--Paramiko-->  Remote Hosts
                               |
                          hosts.json (allowlist)
 ```

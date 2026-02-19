@@ -1,3 +1,3 @@
-"""MCP SSH Server — Secure SSH access for Claude Code via Model Context Protocol."""
+"""MCP SSH Server — Secure SSH access via Model Context Protocol."""
 
 __version__ = "0.1.0"
