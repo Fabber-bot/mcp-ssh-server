@@ -219,6 +219,8 @@ Built on:
 - [FastMCP](https://github.com/jlowin/fastmcp) — Python MCP framework
 - [Paramiko](https://www.paramiko.org/) — SSH library for Python
 
+<!-- mcp-name: io.github.Fabber-bot/ssh -->
+
 ## Troubleshooting
 
 **"Config file not found"** — Make sure you're using the full path to `hosts.json` in your MCP settings, not a relative path.
