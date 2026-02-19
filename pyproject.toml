@@ -1,0 +1,21 @@
+[project]
+name = "mcp-ssh"
+version = "0.1.0"
+description = "Secure SSH access for Claude Code via Model Context Protocol"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+dependencies = [
+    "fastmcp>=2.0.0,<4",
+    "paramiko>=3.0.0,<5",
+]
+
+[project.scripts]
+mcp-ssh = "mcp_ssh.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
